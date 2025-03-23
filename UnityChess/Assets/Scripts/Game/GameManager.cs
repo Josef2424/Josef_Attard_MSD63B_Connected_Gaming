@@ -11,7 +11,7 @@ using Unity.Netcode;
 /// special moves handling (such as castling, en passant, and promotion), and game reset.
 /// Inherits from a singleton base class to ensure a single instance throughout the application.
 /// </summary>
-public class GameManager : MonoBehaviourSingleton<GameManager>
+public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 {
 	// Events signalling various game state changes.
 	public static event Action NewGameStartedEvent;
@@ -129,6 +129,9 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 		// Subscribe to the event triggered when a visual piece is moved.
 		VisualPiece.VisualPieceMoved += OnPieceMoved;
 
+		// Listen for turn changes
+		currentTurn.OnValueChanged += OnTurnChanged;
+
 		// Initialise the serializers for FEN and PGN formats.
 		serializersByType = new Dictionary<GameSerializationType, IGameSerializer>
 		{
@@ -137,7 +140,7 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 		};
 
 		// Begin a new game.
-		StartNewGame();
+		//StartNewGame();
 
 #if DEBUG_VIEW
 		// Enable debug view if compiled with DEBUG_VIEW flag.
@@ -146,13 +149,57 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 #endif
 	}
 
+	public override void OnNetworkSpawn()
+	{
+		base.OnNetworkSpawn();
+
+		if (IsServer)
+		{
+			currentTurn.Value = Side.White;
+			Debug.Log("Server is setting currentTurn to White in OnNetworkSpawn.");
+		}
+	}
+
+	private void OnServerStarted()
+	{
+		if (NetworkManager.Singleton.IsServer)
+		{
+			// Now that netcode is running, we can safely spawn / set variables
+			StartNewGame();
+		}
+	}
+
 	/// <summary>
 	/// Starts a new game by creating a new game instance and invoking the NewGameStartedEvent.
 	/// </summary>
 	public async void StartNewGame()
 	{
 		game = new Game();
+
+		if (IsServer && IsSpawned)
+		{
+			currentTurn.Value = Side.White;
+		}
+
 		NewGameStartedEvent?.Invoke();
+	}
+
+	/// <summary>
+	/// Called only on the server to change the turn.
+	/// </summary>
+	public void ChangeTurn()
+	{
+		if (!NetworkManager.Singleton.IsServer) return; // Only the server should change the turn
+
+		// Toggle between White and Black
+		currentTurn.Value = currentTurn.Value.Complement();
+		Debug.Log("Turn changed to: " + currentTurn.Value);
+	}
+
+	private void OnTurnChanged(Side previousValue, Side newValue)
+	{
+		Debug.Log($"Turn changed from {previousValue} to {newValue}");
+		// Update any UI elements or indicators to reflect the new turn
 	}
 
 	/// <summary>
@@ -326,6 +373,14 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 		// Determine the destination square based on the name of the closest board square transform.
 		Square endSquare = new Square(closestBoardSquareTransform.name);
 
+		// Check if it is the correct player's turn to move
+		Piece pieceToMove = CurrentBoard[movedPieceInitialSquare];
+		if (pieceToMove == null || pieceToMove.Owner != CurrentTurn)
+		{
+			Debug.Log("It's not your turn or invalid piece to move.");
+			return;
+		}
+
 		// Attempt to retrieve a legal move from the game logic.
 		if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
 		{
@@ -364,6 +419,8 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 			// Re-parent the moved piece to the destination square and update its position.
 			movedPieceTransform.parent = closestBoardSquareTransform;
 			movedPieceTransform.position = closestBoardSquareTransform.position;
+
+			ChangeTurn();
 		}
 	}
 

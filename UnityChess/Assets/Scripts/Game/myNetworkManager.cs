@@ -83,9 +83,12 @@ public class myNetworkManager : MonoBehaviour
         if (NetworkManager.Singleton.IsServer)
         {
             // Ensure GameManager.Instance is not null.
+            BoardManager.Instance.CreateBoardSquares();
             GameManager.Instance.StartNewGame();
             Debug.Log("New game started on server.");
         }
+
+        
     }
 
     private void OnClientConnected(ulong clientId)
