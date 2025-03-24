@@ -50,6 +50,8 @@ public class VisualPiece : MonoBehaviour
 	// A cached reference to the transform of this piece.
 	private Transform thisTransform;
 
+	private bool isInputAllowed = false;
+
 	/// <summary>
 	/// Initialises the visual piece. Sets up necessary variables and obtains a reference to the main camera.
 	/// </summary>
@@ -69,11 +71,22 @@ public class VisualPiece : MonoBehaviour
 	/// </summary>
 	public void OnMouseDown()
 	{
-		if (enabled)
+		if (!enabled) return;
+		// Disable input if this piece is not controlled by the active turn.
+		if (GameManager.Instance != null && GameManager.Instance.CurrentTurn != PieceColor)
+		{
+			Debug.Log("Not your turn! Input is locked for this piece.");
+			isInputAllowed = false;
+			// Optionally, provide visual feedback that the piece is locked.
+			return;
+		}
+		isInputAllowed = true;
+		piecePositionSS = boardCamera.WorldToScreenPoint(transform.position);
+		/*if (enabled)
 		{
 			// Convert the world position of the piece to screen-space and store it.
 			piecePositionSS = boardCamera.WorldToScreenPoint(transform.position);
-		}
+		}*/
 	}
 
 	/// <summary>
@@ -82,14 +95,12 @@ public class VisualPiece : MonoBehaviour
 	/// </summary>
 	private void OnMouseDrag()
 	{
-		if (enabled)
-		{
-			// Create a new screen-space position based on the current mouse position,
-			// preserving the original depth (z-coordinate).
-			Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
-			// Convert the screen-space position back to world-space and update the piece's position.
-			thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
-		}
+		if (!enabled || !isInputAllowed) return;
+		// Create a new screen-space position based on the current mouse position,
+		// preserving the original depth (z-coordinate).
+		Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
+		// Convert the screen-space position back to world-space and update the piece's position.
+		thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
 	}
 
 	/// <summary>
@@ -98,42 +109,38 @@ public class VisualPiece : MonoBehaviour
 	/// </summary>
 	public void OnMouseUp()
 	{
-		if (enabled)
+		if (!enabled || !isInputAllowed)
 		{
-			// Clear any previous potential landing square candidates.
-			potentialLandingSquares.Clear();
-			// Obtain all square GameObjects within the collision radius of the piece's current position.
-			BoardManager.Instance.GetSquareGOsWithinRadius(potentialLandingSquares, thisTransform.position, SquareCollisionRadius);
-
-			// If no squares are found, assume the piece was moved off the board and reset its position.
-			if (potentialLandingSquares.Count == 0)
-			{ // piece moved off board
-				thisTransform.position = thisTransform.parent.position;
-				return;
-			}
-
-			// Determine the closest square from the list of potential landing squares.
-			Transform closestSquareTransform = potentialLandingSquares[0].transform;
-			// Calculate the square of the distance between the piece and the first candidate square.
-			float shortestDistanceFromPieceSquared = (closestSquareTransform.position - thisTransform.position).sqrMagnitude;
-
-			// Iterate through remaining potential squares to find the closest one.
-			for (int i = 1; i < potentialLandingSquares.Count; i++)
-			{
-				GameObject potentialLandingSquare = potentialLandingSquares[i];
-				// Calculate the squared distance from the piece to the candidate square.
-				float distanceFromPieceSquared = (potentialLandingSquare.transform.position - thisTransform.position).sqrMagnitude;
-
-				// If the current candidate is closer than the previous closest, update the closest square.
-				if (distanceFromPieceSquared < shortestDistanceFromPieceSquared)
-				{
-					shortestDistanceFromPieceSquared = distanceFromPieceSquared;
-					closestSquareTransform = potentialLandingSquare.transform;
-				}
-			}
-
-			// Raise the VisualPieceMoved event with the initial square, the piece's transform, and the closest square transform.
-			VisualPieceMoved?.Invoke(CurrentSquare, thisTransform, closestSquareTransform);
+			// If input isn't allowed, snap the piece back to its parent (its original square).
+			if (transform.parent != null)
+				thisTransform.position = transform.parent.position;
+			return;
 		}
+
+		potentialLandingSquares.Clear();
+		BoardManager.Instance.GetSquareGOsWithinRadius(potentialLandingSquares, thisTransform.position, SquareCollisionRadius);
+
+		if (potentialLandingSquares.Count == 0)
+		{
+			thisTransform.position = transform.parent.position;
+			return;
+		}
+
+		Transform closestSquareTransform = potentialLandingSquares[0].transform;
+		float shortestDistanceFromPieceSquared = (closestSquareTransform.position - thisTransform.position).sqrMagnitude;
+
+		for (int i = 1; i < potentialLandingSquares.Count; i++)
+		{
+			GameObject potentialLandingSquare = potentialLandingSquares[i];
+			float distanceFromPieceSquared = (potentialLandingSquare.transform.position - thisTransform.position).sqrMagnitude;
+			if (distanceFromPieceSquared < shortestDistanceFromPieceSquared)
+			{
+				shortestDistanceFromPieceSquared = distanceFromPieceSquared;
+				closestSquareTransform = potentialLandingSquare.transform;
+			}
+		}
+
+		// Raise the event to signal a move.
+		VisualPieceMoved?.Invoke(CurrentSquare, thisTransform, closestSquareTransform);
 	}
 }
