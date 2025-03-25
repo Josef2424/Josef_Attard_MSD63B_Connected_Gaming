@@ -4,34 +4,24 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityChess;
 using UnityEngine;
-using Unity.Netcode;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
 /// special moves handling (such as castling, en passant, and promotion), and game reset.
 /// Inherits from a singleton base class to ensure a single instance throughout the application.
 /// </summary>
-public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
-{
+public class GameManager : MonoBehaviourSingleton<GameManager> {
 	// Events signalling various game state changes.
 	public static event Action NewGameStartedEvent;
 	public static event Action GameEndedEvent;
 	public static event Action GameResetToHalfMoveEvent;
 	public static event Action MoveExecutedEvent;
-
-	private NetworkVariable<Side> currentTurn = new NetworkVariable<Side>(Side.White);
-
-	// Public property to access the current turn
-	public Side CurrentTurn => currentTurn.Value;
-
-
+	
 	/// <summary>
 	/// Gets the current board state from the game.
 	/// </summary>
-	public Board CurrentBoard
-	{
-		get
-		{
+	public Board CurrentBoard {
+		get {
 			// Attempts to retrieve the current board from the board timeline.
 			game.BoardTimeline.TryGetCurrent(out Board currentBoard);
 			return currentBoard;
@@ -41,10 +31,8 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// <summary>
 	/// Gets the side (White/Black) whose turn it is to move.
 	/// </summary>
-	public Side SideToMove
-	{
-		get
-		{
+	public Side SideToMove {
+		get {
 			// Retrieves the current game conditions and returns the active side.
 			game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
 			return currentConditions.SideToMove;
@@ -55,22 +43,21 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// Gets the side that started the game.
 	/// </summary>
 	public Side StartingSide => game.ConditionsTimeline[0].SideToMove;
-
+	
 	/// <summary>
 	/// Gets the timeline of half-moves made in the game.
 	/// </summary>
 	public Timeline<HalfMove> HalfMoveTimeline => game.HalfMoveTimeline;
-
+	
 	/// <summary>
 	/// Gets the index of the most recent half-move.
 	/// </summary>
 	public int LatestHalfMoveIndex => game.HalfMoveTimeline.HeadIndex;
-
+	
 	/// <summary>
 	/// Computes the full move number based on the starting side and the latest half-move index.
 	/// </summary>
-	public int FullMoveNumber => StartingSide switch
-	{
+	public int FullMoveNumber => StartingSide switch {
 		Side.White => LatestHalfMoveIndex / 2 + 1,
 		Side.Black => (LatestHalfMoveIndex + 1) / 2 + 1,
 		_ => -1
@@ -82,17 +69,13 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// <summary>
 	/// Gets a list of all current pieces on the board, along with their positions.
 	/// </summary>
-	public List<(Square, Piece)> CurrentPieces
-	{
-		get
-		{
+	public List<(Square, Piece)> CurrentPieces {
+		get {
 			// Clear the backing list before populating with current pieces.
 			currentPiecesBacking.Clear();
 			// Iterate over every square on the board.
-			for (int file = 1; file <= 8; file++)
-			{
-				for (int rank = 1; rank <= 8; rank++)
-				{
+			for (int file = 1; file <= 8; file++) {
+				for (int rank = 1; rank <= 8; rank++) {
 					Piece piece = CurrentBoard[file, rank];
 					// If a piece exists at this position, add it to the list.
 					if (piece != null) currentPiecesBacking.Add((new Square(file, rank), piece));
@@ -104,7 +87,7 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 
 	// Backing list for storing current pieces on the board.
 	private readonly List<(Square, Piece)> currentPiecesBacking = new List<(Square, Piece)>();
-
+	
 	// Reference to the debug utility for the chess engine.
 	[SerializeField] private UnityChessDebug unityChessDebug;
 	// The current game instance.
@@ -120,105 +103,53 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	private Dictionary<GameSerializationType, IGameSerializer> serializersByType;
 	// Currently selected serialization type (default is FEN).
 	private GameSerializationType selectedSerializationType = GameSerializationType.FEN;
-
+	
 	/// <summary>
 	/// Unity's Start method initialises the game and sets up event handlers.
 	/// </summary>
-	public void Start()
-	{
+	public void Start() {
 		// Subscribe to the event triggered when a visual piece is moved.
 		VisualPiece.VisualPieceMoved += OnPieceMoved;
 
-		// Listen for turn changes
-		currentTurn.OnValueChanged += OnTurnChanged;
-
 		// Initialise the serializers for FEN and PGN formats.
-		serializersByType = new Dictionary<GameSerializationType, IGameSerializer>
-		{
+		serializersByType = new Dictionary<GameSerializationType, IGameSerializer> {
 			[GameSerializationType.FEN] = new FENSerializer(),
 			[GameSerializationType.PGN] = new PGNSerializer()
 		};
-
+		
 		// Begin a new game.
-		//StartNewGame();
-
+		StartNewGame();
+		
 #if DEBUG_VIEW
 		// Enable debug view if compiled with DEBUG_VIEW flag.
 		unityChessDebug.gameObject.SetActive(true);
 		unityChessDebug.enabled = true;
 #endif
 	}
-
-	public override void OnNetworkSpawn()
-	{
-		base.OnNetworkSpawn();
-
-		if (IsServer)
-		{
-			currentTurn.Value = Side.White;
-			Debug.Log("Server is setting currentTurn to White in OnNetworkSpawn.");
-		}
-	}
-
-	private void OnServerStarted()
-	{
-		if (NetworkManager.Singleton.IsServer)
-		{
-			// Now that netcode is running, we can safely spawn / set variables
-			StartNewGame();
-		}
-	}
-
+	
 	/// <summary>
 	/// Starts a new game by creating a new game instance and invoking the NewGameStartedEvent.
 	/// </summary>
-	public async void StartNewGame()
-	{
+	public async void StartNewGame() {
 		game = new Game();
-
-		if (IsServer && IsSpawned)
-		{
-			currentTurn.Value = Side.White;
-		}
-
 		NewGameStartedEvent?.Invoke();
-	}
-
-	/// <summary>
-	/// Called only on the server to change the turn.
-	/// </summary>
-	public void ChangeTurn()
-	{
-		if (!NetworkManager.Singleton.IsServer) return; // Only the server should change the turn
-
-		// Toggle between White and Black
-		currentTurn.Value = currentTurn.Value.Complement();
-		Debug.Log("Turn changed to: " + currentTurn.Value);
-	}
-
-	private void OnTurnChanged(Side previousValue, Side newValue)
-	{
-		Debug.Log($"Turn changed from {previousValue} to {newValue}");
-		// Update any UI elements or indicators to reflect the new turn
 	}
 
 	/// <summary>
 	/// Serialises the current game state using the selected serialization format.
 	/// </summary>
 	/// <returns>A string representing the serialised game state.</returns>
-	public string SerializeGame()
-	{
+	public string SerializeGame() {
 		return serializersByType.TryGetValue(selectedSerializationType, out IGameSerializer serializer)
 			? serializer?.Serialize(game)
 			: null;
 	}
-
+	
 	/// <summary>
 	/// Loads a game from the given serialised game state string.
 	/// </summary>
 	/// <param name="serializedGame">The serialised game state string.</param>
-	public void LoadGame(string serializedGame)
-	{
+	public void LoadGame(string serializedGame) {
 		game = serializersByType[selectedSerializationType].Deserialize(serializedGame);
 		NewGameStartedEvent?.Invoke();
 	}
@@ -227,11 +158,10 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// Resets the game to a specific half-move index.
 	/// </summary>
 	/// <param name="halfMoveIndex">The target half-move index to reset the game to.</param>
-	public void ResetGameToHalfMoveIndex(int halfMoveIndex)
-	{
+	public void ResetGameToHalfMoveIndex(int halfMoveIndex) {
 		// If the reset operation fails, exit early.
 		if (!game.ResetGameToHalfMoveIndex(halfMoveIndex)) return;
-
+		
 		// Disable promotion UI and cancel any pending promotion tasks.
 		UIManager.Instance.SetActivePromotionUI(false);
 		promotionUITaskCancellationTokenSource?.Cancel();
@@ -244,25 +174,20 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// </summary>
 	/// <param name="move">The move to execute.</param>
 	/// <returns>True if the move was successfully executed; otherwise, false.</returns>
-	private bool TryExecuteMove(Movement move)
-	{
+	private bool TryExecuteMove(Movement move) {
 		// Attempt to execute the move within the game logic.
-		if (!game.TryExecuteMove(move))
-		{
+		if (!game.TryExecuteMove(move)) {
 			return false;
 		}
 
 		// Retrieve the latest half-move from the timeline.
 		HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
-
+		
 		// If the latest move resulted in checkmate or stalemate, disable further moves.
-		if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
-		{
+		if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate) {
 			BoardManager.Instance.SetActiveAllPieces(false);
 			GameEndedEvent?.Invoke();
-		}
-		else
-		{
+		} else {
 			// Otherwise, ensure that only the pieces of the side to move are enabled.
 			BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
 		}
@@ -272,16 +197,14 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 
 		return true;
 	}
-
+	
 	/// <summary>
 	/// Handles special move behaviour asynchronously (castling, en passant, and promotion).
 	/// </summary>
 	/// <param name="specialMove">The special move to process.</param>
 	/// <returns>A task that resolves to true if the special move was handled; otherwise, false.</returns>
-	private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove)
-	{
-		switch (specialMove)
-		{
+	private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove) {
+		switch (specialMove) {
 			// Handle castling move.
 			case CastlingMove castlingMove:
 				BoardManager.Instance.CastleRook(castlingMove.RookSquare, castlingMove.GetRookEndSquare());
@@ -299,17 +222,17 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 				// Cancel any pending promotion UI tasks.
 				promotionUITaskCancellationTokenSource?.Cancel();
 				promotionUITaskCancellationTokenSource = new CancellationTokenSource();
-
+				
 				// Await user's promotion choice asynchronously.
 				ElectedPiece choice = await Task.Run(GetUserPromotionPieceChoice, promotionUITaskCancellationTokenSource.Token);
-
+				
 				// Deactivate the promotion UI and re-enable all pieces.
 				UIManager.Instance.SetActivePromotionUI(false);
 				BoardManager.Instance.SetActiveAllPieces(true);
 
 				// If the task was cancelled, return false.
 				if (promotionUITaskCancellationTokenSource == null
-					|| promotionUITaskCancellationTokenSource.Token.IsCancellationRequested
+				    || promotionUITaskCancellationTokenSource.Token.IsCancellationRequested
 				) { return false; }
 
 				// Set the chosen promotion piece.
@@ -328,20 +251,19 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 				BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
 				BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
 				BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
-
+				
 				return true;
 			// Default case: if the special move is not recognised.
 			default:
 				return false;
 		}
 	}
-
+	
 	/// <summary>
 	/// Blocks until the user selects a piece for pawn promotion.
 	/// </summary>
 	/// <returns>The elected promotion piece chosen by the user.</returns>
-	private ElectedPiece GetUserPromotionPieceChoice()
-	{
+	private ElectedPiece GetUserPromotionPieceChoice() {
 		// Wait until the user selects a promotion piece.
 		while (userPromotionChoice == ElectedPiece.None) { }
 
@@ -350,13 +272,12 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 		userPromotionChoice = ElectedPiece.None;
 		return result;
 	}
-
+	
 	/// <summary>
 	/// Allows the user to elect a promotion piece.
 	/// </summary>
 	/// <param name="choice">The elected promotion piece.</param>
-	public void ElectPiece(ElectedPiece choice)
-	{
+	public void ElectPiece(ElectedPiece choice) {
 		userPromotionChoice = choice;
 	}
 
@@ -368,22 +289,12 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 	/// <param name="movedPieceTransform">The transform of the moved piece.</param>
 	/// <param name="closestBoardSquareTransform">The transform of the closest board square.</param>
 	/// <param name="promotionPiece">Optional promotion piece (used in pawn promotion).</param>
-	private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
-	{
+	private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null) {
 		// Determine the destination square based on the name of the closest board square transform.
 		Square endSquare = new Square(closestBoardSquareTransform.name);
 
-		// Check if it is the correct player's turn to move
-		Piece pieceToMove = CurrentBoard[movedPieceInitialSquare];
-		if (pieceToMove == null || pieceToMove.Owner != CurrentTurn)
-		{
-			Debug.Log("It's not your turn or invalid piece to move.");
-			return;
-		}
-
 		// Attempt to retrieve a legal move from the game logic.
-		if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
-		{
+		if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move)) {
 			// If no legal move is found, reset the piece's position.
 			movedPieceTransform.position = movedPieceTransform.parent.position;
 #if DEBUG_VIEW
@@ -396,41 +307,35 @@ public class GameManager : NetworkMonoBehaviourSingleton<GameManager>
 		}
 
 		// If the move is a promotion move, set the promotion piece.
-		if (move is PromotionMove promotionMove)
-		{
+		if (move is PromotionMove promotionMove) {
 			promotionMove.SetPromotionPiece(promotionPiece);
 		}
 
 		// If the move is not a special move or its special behaviour is successfully handled,
 		// and the move executes successfully...
 		if ((move is not SpecialMove specialMove || await TryHandleSpecialMoveBehaviourAsync(specialMove))
-			&& TryExecuteMove(move)
-		)
-		{
+		    && TryExecuteMove(move)
+		) {
 			// For non-special moves, update the board visuals by destroying any piece at the destination.
 			if (move is not SpecialMove) { BoardManager.Instance.TryDestroyVisualPiece(move.End); }
 
 			// For promotion moves, update the moved piece transform to the newly created visual piece.
-			if (move is PromotionMove)
-			{
+			if (move is PromotionMove) {
 				movedPieceTransform = BoardManager.Instance.GetPieceGOAtPosition(move.End).transform;
 			}
 
 			// Re-parent the moved piece to the destination square and update its position.
 			movedPieceTransform.parent = closestBoardSquareTransform;
 			movedPieceTransform.position = closestBoardSquareTransform.position;
-
-			ChangeTurn();
 		}
 	}
-
+	
 	/// <summary>
 	/// Determines whether the specified piece has any legal moves.
 	/// </summary>
 	/// <param name="piece">The chess piece to evaluate.</param>
 	/// <returns>True if the piece has at least one legal move; otherwise, false.</returns>
-	public bool HasLegalMoves(Piece piece)
-	{
+	public bool HasLegalMoves(Piece piece) {
 		return game.TryGetLegalMovesForPiece(piece, out _);
 	}
 }
