@@ -15,7 +15,7 @@ public class VisualPiece : MonoBehaviour {
 	public delegate void VisualPieceMovedAction(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null);
 	
 	// Static event raised when a visual piece is moved.
-	public static event VisualPieceMovedAction VisualPieceMoved;
+	public static VisualPieceMovedAction VisualPieceMoved;
 	
 	// The colour (side) of the piece (White or Black).
 	public Side PieceColor;
