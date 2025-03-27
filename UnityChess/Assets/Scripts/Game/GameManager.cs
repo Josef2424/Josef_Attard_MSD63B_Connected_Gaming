@@ -370,7 +370,6 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 		return game.TryGetLegalMovesForPiece(piece, out _);
 	}
 
-	// Add this method to GameManager.cs
 	public bool ExecuteMove(Movement move)
 	{
 		// Uses your existing TryExecuteMove logic

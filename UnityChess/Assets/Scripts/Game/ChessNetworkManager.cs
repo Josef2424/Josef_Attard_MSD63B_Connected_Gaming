@@ -22,15 +22,27 @@ public class ChessNetworkManager : NetworkBehaviour
     [SerializeField] private GameObject connectionPanel;
     [SerializeField] private Button hostButton;
     [SerializeField] private Button clientButton;
+    [SerializeField] private Button rejoinButton;
     [SerializeField] private Button disconnectButton;
     [SerializeField] private InputField ipAddressInput;
     [SerializeField] private Text connectionStatusText;
+
+    [Header("Game Status")]
     [SerializeField] private Text playerSideText;
+    [SerializeField] private Text turnIndicatorText;
+
     [Header("Game UI")]
     [SerializeField] private GameObject gamePanel;
 
     // Port for the game server
     [SerializeField] private ushort networkPort = 7777;
+
+    [Header("Network Diagnostics")]
+    [SerializeField] private float pingInterval = 2.0f; // How often to measure ping in seconds
+    private float lastPingTime;
+    private Dictionary<ulong, float> clientPingTimes = new Dictionary<ulong, float>(); // Stores the send time for ping requests
+    private Dictionary<ulong, int> lastPingResults = new Dictionary<ulong, int>();
+
 
     // Dictionary to store connected players and their assigned sides
     private Dictionary<ulong, Side> playerSides = new Dictionary<ulong, Side>();
@@ -62,10 +74,12 @@ public class ChessNetworkManager : NetworkBehaviour
         // Set up UI button listeners
         hostButton.onClick.AddListener(CreateGame);
         clientButton.onClick.AddListener(JoinGame);
+        rejoinButton.onClick.AddListener(RejoinGame);
         disconnectButton.onClick.AddListener(LeaveGame);
 
         // Set initial UI state
         connectionPanel.SetActive(true);
+        rejoinButton.gameObject.SetActive(false);
         disconnectButton.gameObject.SetActive(false);
 
         // Set up network event handlers
@@ -77,6 +91,11 @@ public class ChessNetworkManager : NetworkBehaviour
 
         // Have ONLY ONE subscription to VisualPiece.VisualPieceMoved
         //VisualPiece.VisualPieceMoved += InterceptPieceMove;
+
+        //Initialise ping measurement
+        lastPingTime = 0f;
+        clientPingTimes.Clear();
+        lastPingResults.Clear();
     }
 
     private void OnDestroy()
@@ -226,6 +245,32 @@ public class ChessNetworkManager : NetworkBehaviour
     }
 
     /// <summary>
+    /// Rejoins an existing game and synchronises the current game state
+    /// </summary>
+    public void RejoinGame()
+    {
+        // First check if there's a game running
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsListening)
+        {
+            // Start as client by default when rejoining
+            Debug.Log("No active NetworkManager, starting fresh client connection");
+            JoinGame();
+            return;
+        }
+
+        // If we're still connected as host or client, don't rejoin
+        if (NetworkManager.Singleton.IsConnectedClient)
+        {
+            Debug.Log("Already connected to a game");
+            return;
+        }
+
+        // Try to rejoin as client
+        Debug.Log("Rejoining game as client...");
+        JoinGame();
+    }
+
+    /// <summary>
     /// Disconnects from the current game session
     /// </summary>
     public void LeaveGame()
@@ -236,6 +281,7 @@ public class ChessNetworkManager : NetworkBehaviour
             //Store whether we are the host before shutting down
             bool wasHost = NetworkManager.Singleton.IsHost;
             bool wasClient = NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsHost;
+            bool wasInGame = isMultiplayerGameActive;
 
             // Shut down the network connection
             NetworkManager.Singleton.Shutdown();
@@ -249,13 +295,22 @@ public class ChessNetworkManager : NetworkBehaviour
             UpdateConnectionStatus(wasHost ? "Disconnected. Ready to start a new game." : "Disconnected from host. Ready to start a new game.");
             // Show connection UI
             if (connectionPanel != null) connectionPanel.SetActive(true);
-            if (gamePanel != null) gamePanel.SetActive(false);
+            if (gamePanel != null) gamePanel.SetActive(true);
 
             // Show buttons
             if (hostButton != null) hostButton.gameObject.SetActive(true);
             if (clientButton != null) clientButton.gameObject.SetActive(true);
             if (ipAddressInput != null) ipAddressInput.gameObject.SetActive(true);
             if (disconnectButton != null) disconnectButton.gameObject.SetActive(false);
+
+            // Only show rejoin button if we were in a game and not the host
+            if (rejoinButton != null) rejoinButton.gameObject.SetActive(wasInGame && !wasHost);
+
+            // Hide turn indicator by setting empty text
+            if (turnIndicatorText != null)
+            {
+                turnIndicatorText.text = "";
+            }
         }
     }
 
@@ -294,7 +349,16 @@ public class ChessNetworkManager : NetworkBehaviour
         else if (NetworkManager.Singleton.IsClient && clientId == NetworkManager.Singleton.LocalClientId)
         {
             UpdateConnectionStatus("Connected to host.");
+
+            // If we're rejoining, request the current game state
+            if (isMultiplayerGameActive)
+            {
+                Debug.Log("Requesting game state sync from server...");
+                RequestGameStateSyncServerRpc();
+            }
         }
+
+        Debug.Log($"[NETWORK] Client {clientId} connected. Ping measurements enabled.");
     }
 
     /// <summary>
@@ -302,7 +366,7 @@ public class ChessNetworkManager : NetworkBehaviour
     /// </summary>
     private void OnClientDisconnect(ulong clientId)
     {
-        Debug.Log($"Client disconnected: {clientId}");
+        Debug.Log($"[NETWORK] Client {clientId} disconnected.");
 
         bool isLocalClientDisconnect = clientId == NetworkManager.Singleton.LocalClientId;
 
@@ -318,9 +382,28 @@ public class ChessNetworkManager : NetworkBehaviour
             UpdateConnectionStatus("Opponent disconnected. Waiting for new opponent...");
         }
         // If we're disconnecting as a client
-        else if (!isLocalClientDisconnect)
+        else if (isLocalClientDisconnect)
         {
-            LeaveGame();
+            // Show rejoin button if we were in a multiplayer game
+            if (isMultiplayerGameActive && rejoinButton != null)
+            {
+                rejoinButton.gameObject.SetActive(true);
+                UpdateConnectionStatus("Disconnected from host. Click Rejoin to reconnect.");
+            }
+            else
+            {
+                LeaveGame();
+            }
+        }
+
+        // Check if we had ping results for this client
+        if (lastPingResults.TryGetValue(clientId, out int lastPing))
+        {
+            Debug.Log($"[NETWORK] Client {clientId} disconnected. Last measured ping: {lastPing}ms");
+        }
+        else
+        {
+            Debug.Log($"[NETWORK] Client {clientId} disconnected. No ping measurement available.");
         }
     }
 
@@ -361,6 +444,9 @@ public class ChessNetworkManager : NetworkBehaviour
 
         // Update pieces to only allow movement of own side
         UpdatePieceControl();
+
+        //Update the turn indicator
+        UpdateTurnIndicator();
 
         // Update UI with message
         UpdateConnectionStatus("Game started!");
@@ -530,6 +616,28 @@ public class ChessNetworkManager : NetworkBehaviour
         UpdatePieceControl();
     }
 
+    /// <summary>
+    /// Updates the turn indicator text to show whose turn it is
+    /// </summary>
+    private void UpdateTurnIndicator()
+    {
+        if (turnIndicatorText == null) return;
+
+        Side currentTurn = GameManager.Instance.SideToMove;
+        Side localPlayerSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
+
+        if (currentTurn == localPlayerSide)
+        {
+            turnIndicatorText.text = "YOUR TURN";
+            turnIndicatorText.color = Color.green;
+        }
+        else
+        {
+            turnIndicatorText.text = "OPPONENT'S TURN";
+            turnIndicatorText.color = Color.red;
+        }
+    }
+
     private void Update()
     {
         // Make sure both connection panel and game panel are visible when needed
@@ -556,7 +664,65 @@ public class ChessNetworkManager : NetworkBehaviour
             {
                 gamePanel.SetActive(true);
             }
+
+            // Measure ping at regular intervals
+            if (Time.time - lastPingTime > pingInterval)
+            {
+                lastPingTime = Time.time;
+                MeasurePing();
+            }
         }
+
+        if (Time.frameCount % 300 == 0) // Log every 300 frames
+        {
+            LogNetworkStats();
+        }
+    }
+
+    /// <summary>
+    /// Sends the current game state to a specific client
+    /// </summary>
+    [ServerRpc(RequireOwnership = false)]
+    public void RequestGameStateSyncServerRpc(ServerRpcParams serverRpcParams = default)
+    {
+        if (!NetworkManager.Singleton.IsServer) return;
+
+        // Get the client ID that sent the request
+        ulong clientId = serverRpcParams.Receive.SenderClientId;
+        Debug.Log($"Received game state sync request from client {clientId}");
+
+        // Generate a serialized game state
+        string gameState = GameManager.Instance.SerializeGame();
+
+        // Send the game state to the requesting client
+        SyncGameStateClientRpc(gameState, new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams
+            {
+                TargetClientIds = new[] { clientId }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Receives and applies the current game state from the server
+    /// </summary>
+    [ClientRpc]
+    public void SyncGameStateClientRpc(string serializedGameState, ClientRpcParams clientRpcParams = default)
+    {
+        // Don't apply the state on the server (which is also a client)
+        if (NetworkManager.Singleton.IsHost) return;
+
+        Debug.Log("Received game state from server, applying...");
+
+        // Apply the game state
+        GameManager.Instance.LoadGame(serializedGameState);
+
+        // Update the turn indicator
+        UpdateTurnIndicator();
+
+        // Ensure only the correct player's pieces are enabled
+        UpdatePieceControl();
     }
 
     /// <summary>
@@ -634,6 +800,91 @@ public class ChessNetworkManager : NetworkBehaviour
         if (isMultiplayerGameActive)
         {
             UpdatePieceControl();
+            UpdateTurnIndicator();
+        }
+    }
+
+    private void MeasurePing()
+    {
+        // Only send ping requests if we're connected
+        if (!NetworkManager.Singleton.IsConnectedClient)
+            return;
+
+        // Store the current time when sending the ping with higher precision
+        ulong localClientId = NetworkManager.Singleton.LocalClientId;
+        clientPingTimes[localClientId] = (float)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+
+        // Send ping to server
+        PingServerRpc();
+
+        // Log to console for debugging
+        Debug.Log($"[PING] Sent ping request at {Time.realtimeSinceStartup:F3}s");
+    }
+
+    [ClientRpc]
+    private void PingResponseClientRpc(ClientRpcParams clientRpcParams = default)
+    {
+        // When client receives ping response, calculate the round-trip time with higher precision
+        double currentTime = (double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+        ulong localClientId = NetworkManager.Singleton.LocalClientId;
+
+        if (clientPingTimes.TryGetValue(localClientId, out float startTime))
+        {
+            // Calculate ping time in milliseconds with higher precision
+            double pingTimeSeconds = currentTime - startTime;
+            int pingTimeMs = Mathf.RoundToInt((float)(pingTimeSeconds * 1000));
+
+            // Store the calculated ping (minimum 1ms for display purposes)
+            lastPingResults[localClientId] = Mathf.Max(1, pingTimeMs);
+
+            // Log the ping measurement to console
+            Debug.Log($"[PING] Measured latency: {lastPingResults[localClientId]}ms");
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void PingServerRpc(ServerRpcParams serverRpcParams = default)
+    {
+        // When server receives ping, immediately respond back to the client
+        ulong clientId = serverRpcParams.Receive.SenderClientId;
+
+        // Log the receipt of ping at server
+        Debug.Log($"[PING] Server received ping from client {clientId}");
+
+        // Send response back to the client
+        PingResponseClientRpc(new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams
+            {
+                TargetClientIds = new[] { clientId }
+            }
+        });
+    }
+
+    private void LogNetworkStats()
+    {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient)
+        {
+            string role = NetworkManager.Singleton.IsHost ? "Host" : "Client";
+            ulong localClientId = NetworkManager.Singleton.LocalClientId;
+
+            // Only try to get client count on the server/host
+            int connectedClients = 0;
+            if (NetworkManager.Singleton.IsServer)
+            {
+                connectedClients = NetworkManager.Singleton.ConnectedClientsList.Count;
+            }
+
+            // Get last ping if available
+            string pingInfo = "No ping data";
+            if (lastPingResults.TryGetValue(localClientId, out int lastPing))
+            {
+                pingInfo = $"{lastPing}ms";
+            }
+
+            Debug.Log($"[NETWORK STATS] Role: {role}, ClientID: {localClientId}, " +
+                      (NetworkManager.Singleton.IsServer ? $"Connected Clients: {connectedClients}, " : "") +
+                      $"Last Measured Ping: {pingInfo}");
         }
     }
 }
