@@ -47,7 +47,7 @@ public class ChessMoveRelay : NetworkBehaviour
     /// Intercepts piece moves to synchronize them over the network
     /// </summary>
     private void InterceptPieceMove(Square movedPieceInitialSquare, Transform movedPieceTransform,
-                                    Transform closestBoardSquareTransform, Piece promotionPiece = null)
+        Transform closestBoardSquareTransform, Piece promotionPiece = null)
     {
         // Skip if we're already handling a network move
         if (isHandlingNetworkMove) return;
@@ -151,7 +151,8 @@ public class ChessMoveRelay : NetworkBehaviour
     /// Broadcasts a validated move from server to all clients
     /// </summary>
     [ClientRpc]
-    public void RelayValidatedMoveClientRpc(int startFile, int startRank, int endFile, int endRank, ulong sourceClientId)
+    public void RelayValidatedMoveClientRpc(int startFile, int startRank, int endFile, int endRank,
+        ulong sourceClientId)
     {
         // Don't process if we're the originator
         if (sourceClientId == NetworkManager.Singleton.LocalClientId && !IsHost)
@@ -171,26 +172,31 @@ public class ChessMoveRelay : NetworkBehaviour
     /// Sends a promotion move from client to server AFTER local validation
     /// </summary>
     [ServerRpc(RequireOwnership = false)]
-    public void RelayValidatedPromotionServerRpc(int startFile, int startRank, int endFile, int endRank, int promotionChoice)
+    public void RelayValidatedPromotionServerRpc(int startFile, int startRank, int endFile, int endRank,
+        int promotionChoice)
     {
         // Server receives a validated promotion
-        Debug.Log($"Server received validated promotion: {startFile},{startRank} to {endFile},{endRank}, choice: {promotionChoice}");
+        Debug.Log(
+            $"Server received validated promotion: {startFile},{startRank} to {endFile},{endRank}, choice: {promotionChoice}");
 
         // Broadcast to all clients except the one that sent it
-        RelayValidatedPromotionClientRpc(startFile, startRank, endFile, endRank, promotionChoice, NetworkManager.LocalClientId);
+        RelayValidatedPromotionClientRpc(startFile, startRank, endFile, endRank, promotionChoice,
+            NetworkManager.LocalClientId);
     }
 
     /// <summary>
     /// Broadcasts a validated promotion move from server to all clients
     /// </summary>
     [ClientRpc]
-    public void RelayValidatedPromotionClientRpc(int startFile, int startRank, int endFile, int endRank, int promotionChoice, ulong sourceClientId)
+    public void RelayValidatedPromotionClientRpc(int startFile, int startRank, int endFile, int endRank,
+        int promotionChoice, ulong sourceClientId)
     {
         // Don't process if we're the originator
         if (sourceClientId == NetworkManager.Singleton.LocalClientId && !IsHost)
             return;
 
-        Debug.Log($"Client received validated promotion: {startFile},{startRank} to {endFile},{endRank}, choice: {promotionChoice}");
+        Debug.Log(
+            $"Client received validated promotion: {startFile},{startRank} to {endFile},{endRank}, choice: {promotionChoice}");
 
         // Create squares from the coordinates
         Square startSquare = new Square(startFile, startRank);
@@ -212,12 +218,17 @@ public class ChessMoveRelay : NetworkBehaviour
             Debug.Log($"Executing remote move: {startSquare} > {endSquare}");
 
             // Use the standard game flow to execute this move remotely
-            // This avoids parenting issues by letting GameManager handle the UI updates
             GameObject pieceGO = BoardManager.Instance.GetPieceGOAtPosition(startSquare);
             if (pieceGO == null)
             {
-                Debug.LogError($"Failed to find piece at {startSquare} for remote move");
-                return;
+                Debug.Log($"Piece not found at {startSquare} - requesting game state resync");
+
+                // Instead of showing an error, request a full game state sync to fix the desync
+                if (ChessNetworkManager.Instance != null)
+                {
+                    ChessNetworkManager.Instance.RequestGameStateSyncServerRpc();
+                    return;
+                }
             }
 
             // Get the destination square
@@ -238,10 +249,24 @@ public class ChessMoveRelay : NetworkBehaviour
             VisualPiece.VisualPieceMoved += InterceptPieceMove;
 
             Debug.Log($"Successfully executed remote move: {startSquare} to {endSquare}");
+
+            // After successfully executing a remote move, update piece control
+            if (ChessNetworkManager.Instance != null)
+            {
+                Debug.Log("Remote move executed, updating piece control");
+                ChessNetworkManager.Instance.UpdatePieceControl();
+            }
         }
         catch (Exception e)
         {
             Debug.LogError($"Error executing remote move: {e.Message}\n{e.StackTrace}");
+
+            // If an error occurs, request a full game state sync to restore consistency
+            if (ChessNetworkManager.Instance != null)
+            {
+                Debug.Log("Error in remote move execution - requesting game state resync");
+                ChessNetworkManager.Instance.RequestGameStateSyncServerRpc();
+            }
         }
         finally
         {

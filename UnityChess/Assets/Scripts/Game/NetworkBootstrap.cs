@@ -1,6 +1,5 @@
 using UnityEngine;
 using Unity.Netcode;
-using Unity.Netcode.Transports.UTP;
 
 /// <summary>
 /// Bootstraps the networking components for the chess game.
@@ -48,6 +47,44 @@ public class NetworkBootstrap : MonoBehaviour
         if (ChessNetworkManager.Instance == null)
         {
             Debug.LogError("ChessNetworkManager not found! Make sure it's included in the scene.");
+        }
+
+        // Register for network events
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        // Unregister from network events
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+        }
+    }
+
+    private void OnClientConnected(ulong clientId)
+    {
+        Debug.Log($"Client {clientId} connected in NetworkBootstrap");
+
+        // Make sure GameStateSynchronizer exists
+        GameStateSynchronizer synchronizer = FindObjectOfType<GameStateSynchronizer>();
+        if (synchronizer == null)
+        {
+            Debug.Log("Creating GameStateSynchronizer on client connect");
+            GameObject syncObj = new GameObject("GameStateSynchronizer");
+            syncObj.AddComponent<GameStateSynchronizer>();
+
+            // Add NetworkObject component
+            NetworkObject netObj = syncObj.AddComponent<NetworkObject>();
+
+            // If we're the server, spawn it
+            if (NetworkManager.Singleton.IsServer && !netObj.IsSpawned)
+            {
+                netObj.Spawn();
+            }
         }
     }
 }

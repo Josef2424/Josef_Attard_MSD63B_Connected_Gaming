@@ -41,14 +41,31 @@ public class NetworkSetup : MonoBehaviour
                 boardNetObj.DontDestroyWithOwner = true;
             }
 
-            // DO NOT add NetworkObjects to individual squares as it causes conflicts
-
             // Make sure there's a ChessMoveRelay in the scene
             SetupChessMoveRelay();
+
+            // Create the simple synchronizer object
+            CreateGameSynchronizer();
         }
         else
         {
             Debug.LogWarning("Chess board reference not assigned or found in NetworkSetup");
+        }
+
+        GameStateSynchronizer synchronizer = FindObjectOfType<GameStateSynchronizer>();
+        if (synchronizer == null)
+        {
+            GameObject syncObj = new GameObject("GameStateSynchronizer");
+            synchronizer = syncObj.AddComponent<GameStateSynchronizer>();
+
+            // Add NetworkObject component
+            NetworkObject netObj = syncObj.AddComponent<NetworkObject>();
+
+            // If we're the server, spawn it
+            if (NetworkManager.Singleton.IsServer && !netObj.IsSpawned)
+            {
+                netObj.Spawn();
+            }
         }
     }
 
@@ -60,9 +77,27 @@ public class NetworkSetup : MonoBehaviour
         {
             GameObject relayObj = new GameObject("ChessMoveRelay");
             relay = relayObj.AddComponent<ChessMoveRelay>();
+            relay.chessBoard = chessBoard;
 
-            // Set the chess board reference
-            relay.gameObject.AddComponent<NetworkObject>();
+            // Add NetworkObject component
+            relayObj.AddComponent<NetworkObject>();
+        }
+    }
+
+    private void CreateGameSynchronizer()
+    {
+        // Check if the synchronizer already exists
+        GameStateSynchronizer synchronizer = FindObjectOfType<GameStateSynchronizer>();
+
+        if (synchronizer == null)
+        {
+            Debug.Log("Creating GameStateSynchronizer");
+
+            // Create object
+            GameObject syncObj = new GameObject("GameStateSynchronizer");
+            syncObj.AddComponent<GameStateSynchronizer>();
+
+            Debug.Log("GameStateSynchronizer created");
         }
     }
 }
