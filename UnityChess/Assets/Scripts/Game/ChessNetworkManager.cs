@@ -19,6 +19,7 @@ public class ChessNetworkManager : NetworkBehaviour
 
     public static event ChessMoveEvent OnChessMove;
     private bool isGameUiVisible = false;
+    private bool gameCountIncremented = false;
 
     // UI References
     [Header("Connection UI")] [SerializeField]
@@ -505,6 +506,9 @@ public class ChessNetworkManager : NetworkBehaviour
 
                 // Start a new game when a new player joins
                 StartGameClientRpc();
+
+                // Check if we need to increment the game count
+                IncrementGameCountIfNeeded();
             }
             else
             {
@@ -551,6 +555,9 @@ public class ChessNetworkManager : NetworkBehaviour
                     // Fall back to direct method
                     RequestGameStateSyncServerRpc();
                 }
+
+                // Check if we need to increment the game count
+                IncrementGameCountIfNeeded();
             }
         }
     }
@@ -1257,9 +1264,10 @@ public class ChessNetworkManager : NetworkBehaviour
         Side localPlayerSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
         bool isMyTurn = (localPlayerSide == newSideToMove);
 
+        // MODIFIED: Include the full message immediately to avoid a second update
         UpdateConnectionStatus(isMyTurn
-            ? "Your turn to move"
-            : "Waiting for opponent's move");
+            ? $"Your turn to move. You are playing as {localPlayerSide}."
+            : $"Waiting for opponent's move. You are playing as {localPlayerSide}.");
 
         Debug.Log($"Turn changed to {newSideToMove}, local player is {localPlayerSide}, isMyTurn: {isMyTurn}");
     }
@@ -1657,17 +1665,21 @@ public class ChessNetworkManager : NetworkBehaviour
         UpdatePieceControl();
         UpdateUIButtons();
 
-        // Update status message
-        Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
-        Side currentTurn = GameManager.Instance.SideToMove;
+        // MODIFIED: Don't update connection status if it's already set correctly
+        // This prevents the double update that's causing the history to disappear
+        if (!connectionStatusText.text.Contains("You are playing as"))
+        {
+            // Update status message
+            Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
+            Side currentTurn = GameManager.Instance.SideToMove;
 
-        string statusMessage = (localSide == currentTurn)
-            ? $"Your turn to move. You are playing as {localSide}."
-            : $"Waiting for opponent's move. You are playing as {localSide}.";
+            string statusMessage = (localSide == currentTurn)
+                ? $"Your turn to move. You are playing as {localSide}."
+                : $"Waiting for opponent's move. You are playing as {localSide}.";
 
-        UpdateConnectionStatus(statusMessage);
-
-        LogMessage($"UI and controls updated - Playing as {localSide}, current turn is {currentTurn}", "State");
+            UpdateConnectionStatus(statusMessage);
+            LogMessage($"UI and controls updated - Playing as {localSide}, current turn is {currentTurn}", "State");
+        }
     }
 
     /// <summary>
@@ -1692,5 +1704,27 @@ public class ChessNetworkManager : NetworkBehaviour
             Debug.LogError(formattedMessage);
         else
             Debug.Log(formattedMessage);
+    }
+
+    private void IncrementGameCountIfNeeded()
+    {
+        // Skip if we've already incremented the count for this game
+        if (gameCountIncremented)
+            return;
+
+        // Only increment when we have both players connected (host and client)
+        if (NetworkManager.Singleton.ConnectedClientsIds.Count >= 2)
+        {
+            Debug.Log("GAME COUNT EVENT: Both players connected, incrementing game count");
+
+            // Mark as incremented to prevent multiple counts
+            gameCountIncremented = true;
+
+            // Only the host should increment the count in Firebase
+            if (NetworkManager.Singleton.IsHost && FirebaseManager.Instance != null)
+            {
+                FirebaseManager.Instance.IncrementGameCount();
+            }
+        }
     }
 }

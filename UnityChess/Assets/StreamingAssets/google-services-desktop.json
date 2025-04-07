@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1042253872625",
+    "project_id": "josef-attard-cg-dlcstore",
+    "storage_bucket": "josef-attard-cg-dlcstore.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1042253872625:android:2f5631b6edcd81048b5850",
+        "android_client_info": {
+          "package_name": "com.Company.ProductName"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgRP2ZdhLnk-QxJVRXPcQ5SkdhNKj_swg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
