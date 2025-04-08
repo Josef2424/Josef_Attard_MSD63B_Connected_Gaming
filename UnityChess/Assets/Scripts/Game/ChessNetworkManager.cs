@@ -29,6 +29,7 @@ public class ChessNetworkManager : NetworkBehaviour
     [SerializeField] private Button clientButton;
     [SerializeField] private Button rejoinButton;
     [SerializeField] private Button disconnectButton;
+    [SerializeField] private Button resignButton;
     [SerializeField] private InputField ipAddressInput;
     [SerializeField] private Text connectionStatusText;
 
@@ -95,6 +96,11 @@ public class ChessNetworkManager : NetworkBehaviour
         clientButton.onClick.AddListener(JoinGame);
         rejoinButton.onClick.AddListener(RejoinGame);
         disconnectButton.onClick.AddListener(LeaveGame);
+
+        if (resignButton != null)
+        {
+            resignButton.onClick.AddListener(OnResignButtonClicked);
+        }
 
         // Initialize the UI
         InitializeUI();
@@ -470,6 +476,44 @@ public class ChessNetworkManager : NetworkBehaviour
     }
 
     /// <summary>
+    /// Called when the player clicks the resign button
+    /// </summary>
+    public void OnResignButtonClicked()
+    {
+        if (!isMultiplayerGameActive || !NetworkManager.Singleton.IsConnectedClient)
+        {
+            Debug.Log("Cannot resign - not in a multiplayer game");
+            return;
+        }
+
+        Debug.Log("Player is resigning");
+
+        // Get the local player's side
+        Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
+        Side winningSide = localSide.Complement();
+
+        // Set the result text and notify clients
+        if (ChessMoveRelay.Instance != null)
+        {
+            string resultMessage = $"{winningSide} Wins by Resignation!";
+
+            // If we're the server, broadcast directly
+            if (NetworkManager.Singleton.IsServer)
+            {
+                ChessMoveRelay.Instance.NotifyGameEndClientRpc(resultMessage);
+            }
+            else
+            {
+                // If we're a client, tell the server we're resigning
+                ChessMoveRelay.Instance.PlayerResignServerRpc((int)localSide);
+            }
+
+            // Disable all pieces
+            BoardManager.Instance.SetActiveAllPieces(false);
+        }
+    }
+
+    /// <summary>
     /// Update the connection status text displayed to the user
     /// </summary>
     public void UpdateConnectionStatus(string message)
@@ -837,24 +881,29 @@ public class ChessNetworkManager : NetworkBehaviour
             // 3. The piece has legal moves
             if (piece.PieceColor == localPlayerSide && localPlayerSide == currentTurn)
             {
-                Piece chessPiece = GameManager.Instance.CurrentBoard[piece.CurrentSquare];
-                if (chessPiece != null && GameManager.Instance.HasLegalMoves(chessPiece))
+                // Check if game has ended before accessing pieces
+                bool gameEnded = false;
+                if (GameManager.Instance.HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove))
                 {
-                    piece.enabled = true;
-                    enabledCount++;
-                    disabledCount--;
+                    gameEnded = latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate;
+                }
 
-                    // If the state changed, log it
-                    if (!wasEnabled)
+                if (!gameEnded && GameManager.Instance.CurrentBoard != null)
+                {
+                    Piece chessPiece = GameManager.Instance.CurrentBoard[piece.CurrentSquare];
+                    if (chessPiece != null && GameManager.Instance.HasLegalMoves(chessPiece))
                     {
-                        Debug.Log($"Enabled piece at {piece.CurrentSquare}");
+                        piece.enabled = true;
+                        enabledCount++;
+                        disabledCount--;
+
+                        // If the state changed, log it
+                        if (!wasEnabled)
+                        {
+                            Debug.Log($"Enabled piece at {piece.CurrentSquare}");
+                        }
                     }
                 }
-            }
-            else if (wasEnabled)
-            {
-                // If we disabled a previously enabled piece, log it
-                Debug.Log($"Disabled piece at {piece.CurrentSquare} (Color: {piece.PieceColor}, Turn: {currentTurn})");
             }
         }
 

@@ -13,7 +13,7 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 	// Reference to the promotion UI panel.
 	[SerializeField] private GameObject promotionUI = null;
 	// Text element to display game result messages (e.g. win, draw).
-	[SerializeField] private Text resultText = null;
+	[SerializeField] public Text resultText = null;
 	// Input field to display and edit the serialized game state string.
 	[SerializeField] private InputField GameStringInputField = null;
 	// Indicator image for White's turn.

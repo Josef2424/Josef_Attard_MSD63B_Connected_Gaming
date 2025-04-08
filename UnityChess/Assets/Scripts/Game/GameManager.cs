@@ -367,6 +367,7 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 	/// <returns>True if the piece has at least one legal move; otherwise, false.</returns>
 	public bool HasLegalMoves(Piece piece)
 	{
+		if (piece == null || game == null) return false;
 		return game.TryGetLegalMovesForPiece(piece, out _);
 	}
 

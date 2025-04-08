@@ -3,6 +3,7 @@ using System.Collections;
 using Unity.Netcode;
 using UnityEngine;
 using UnityChess;
+using UnityEngine.UI;
 
 /// <summary>
 /// Handles networked chess moves without requiring individual NetworkObjects for all chess pieces.
@@ -13,6 +14,7 @@ public class ChessMoveRelay : NetworkBehaviour
     public static ChessMoveRelay Instance { get; private set; }
 
     [SerializeField] public GameObject chessBoard;
+    [SerializeField] private Text resultText;
 
     // Flag to prevent recursive move handling
     private bool isHandlingNetworkMove = false;
@@ -35,12 +37,111 @@ public class ChessMoveRelay : NetworkBehaviour
     {
         // Listen for local piece moves when this is active
         VisualPiece.VisualPieceMoved += InterceptPieceMove;
+
+        // Subscribe to game events for handling game end conditions
+        GameManager.GameEndedEvent += OnGameEnded;
+        GameManager.NewGameStartedEvent += OnNewGameStarted;
+
+        // Find the result text if not assigned
+        if (resultText == null)
+        {
+            resultText = GameObject.Find("ResultText")?.GetComponent<Text>();
+            if (resultText == null)
+            {
+                Debug.LogWarning("ResultText not found. Game end messages will not be displayed.");
+            }
+            else
+            {
+                // Initially hide the result text
+                resultText.gameObject.SetActive(false);
+            }
+        }
     }
 
     private void OnDestroy()
     {
         // Clean up event subscription
         VisualPiece.VisualPieceMoved -= InterceptPieceMove;
+        GameManager.GameEndedEvent -= OnGameEnded;
+        GameManager.NewGameStartedEvent -= OnNewGameStarted;
+    }
+
+    /// <summary>
+    /// Handles game end event by updating the result text and notifying all clients
+    /// </summary>
+    private void OnGameEnded()
+    {
+        if (resultText == null || GameManager.Instance == null) return;
+
+        // Get the game result
+        if (GameManager.Instance.HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove))
+        {
+            // Determine what to display
+            if (latestHalfMove.CausedCheckmate)
+            {
+                string winner = latestHalfMove.Piece.Owner.ToString();
+                resultText.text = $"{winner} Wins by checkmate!";
+
+                // Send to all clients if we're the server
+                if (IsServer)
+                {
+                    NotifyGameEndClientRpc(resultText.text);
+                    Debug.Log($"Server detected checkmate: {winner} wins. Notifying clients.");
+                }
+            }
+            else if (latestHalfMove.CausedStalemate)
+            {
+                resultText.text = "Draw by Stalemate.";
+
+                // Send to all clients if we're the server
+                if (IsServer)
+                {
+                    NotifyGameEndClientRpc(resultText.text);
+                    Debug.Log("Server detected stalemate. Notifying clients.");
+                }
+            }
+
+            // Show the result text
+            resultText.gameObject.SetActive(true);
+        }
+    }
+
+    /// <summary>
+    /// Notifies all clients about the game end result
+    /// </summary>
+    [ClientRpc]
+    public void NotifyGameEndClientRpc(string resultMessage)
+    {
+        Debug.Log($"[CLIENT {NetworkManager.Singleton.LocalClientId}] NotifyGameEndClientRpc received: {resultMessage}");
+        if (IsServer) return;
+
+        Debug.Log($"Client received game end notification: {resultMessage}");
+
+        // Update the result text
+        if (resultText != null)
+        {
+            resultText.text = resultMessage;
+            resultText.gameObject.SetActive(true);
+        }
+
+        // Disable all pieces
+        if (BoardManager.Instance != null)
+        {
+            BoardManager.Instance.SetActiveAllPieces(false);
+        }
+    }
+
+    /// <summary>
+    /// Handles new game started event by hiding the result text
+    /// </summary>
+    private void OnNewGameStarted()
+    {
+        // Hide result text when a new game starts
+        if (resultText != null)
+        {
+            resultText.text = "";
+            resultText.gameObject.SetActive(false);
+        }
     }
 
     /// <summary>
@@ -331,6 +432,40 @@ public class ChessMoveRelay : NetworkBehaviour
         {
             // Reset flag
             isHandlingNetworkMove = false;
+        }
+    }
+
+    /// <summary>
+    /// Server RPC called when a client resigns
+    /// </summary>
+    [ServerRpc(RequireOwnership = false)]
+    public void PlayerResignServerRpc(int resigningSideValue)
+    {
+        if (!IsServer) return;
+
+        Side resigningSide = (Side)resigningSideValue;
+        Side winningSide = resigningSide.Complement();
+
+        Debug.Log($"Server received resignation from {resigningSide}");
+
+        // Notify all clients of the resignation
+        string message = $"{winningSide} Wins by Resignation!";
+        NotifyGameEndClientRpc(message);
+
+        if (BoardManager.Instance != null)
+        {
+            BoardManager.Instance.SetActiveAllPieces(false);
+        }
+    }
+
+    /// <summary>
+    /// Exposed method to notify game end with a custom message
+    /// </summary>
+    public void NotifyGameEnd(string message)
+    {
+        if (IsServer)
+        {
+            NotifyGameEndClientRpc(message);
         }
     }
 }
