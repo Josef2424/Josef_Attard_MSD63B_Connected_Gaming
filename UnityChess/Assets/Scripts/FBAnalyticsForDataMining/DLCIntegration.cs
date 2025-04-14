@@ -29,8 +29,7 @@ public class DLCIntegration : MonoBehaviour
             profileManager = FindObjectOfType<ProfileManager>();
         }
 
-        // We don't need to set up our own purchase buttons as ProfileManager handles that
-        // We'll only add the analytics logging functionality by hooking into ProfileManager
+        // Analytics logging functionality by hooking into ProfileManager
         if (profileManager != null)
         {
             Debug.Log("DLCIntegration successfully linked to ProfileManager");

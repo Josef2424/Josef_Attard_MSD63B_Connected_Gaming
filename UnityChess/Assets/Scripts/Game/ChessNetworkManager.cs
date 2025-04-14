@@ -1259,7 +1259,7 @@ public class ChessNetworkManager : NetworkBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.MoveExecutedEvent += OnMoveExecuted;
-            // Add this line to handle game resets
+            // Handle game resets
             GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
         }
     }

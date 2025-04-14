@@ -17,7 +17,7 @@ public class ConnectRejoinManager : MonoBehaviour
 
         if (rejoinButton != null)
         {
-            // Add the RejoinManager's handler as a listener to your button
+            // Add the RejoinManager's handler as a listener to the button
             // This will work alongside any existing listeners
             rejoinButton.onClick.AddListener(OnRejoinButtonClicked);
             Debug.Log("ConnectRejoinManager: Successfully connected to rejoin button");

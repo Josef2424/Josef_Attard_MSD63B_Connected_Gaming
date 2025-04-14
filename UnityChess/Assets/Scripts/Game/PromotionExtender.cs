@@ -29,7 +29,5 @@ public class PromotionExtender : MonoBehaviour
     private void OnPromotionChosen(ElectedPiece choice)
     {
         // The original election will work automatically through the GameManager
-        // We don't need to do anything special here, as the ChessNetworkManager 
-        // will intercept the resulting VisualPieceMoved event when the promotion occurs
     }
 }

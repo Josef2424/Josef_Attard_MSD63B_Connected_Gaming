@@ -215,7 +215,7 @@ public class ProfileManager : NetworkBehaviour
         }
         else if (!IsServer && clientId == NetworkManager.Singleton.LocalClientId)
         {
-            // We just connected as a client, request current state
+            // Connected as a client, request current state
             RequestProfilePicSyncServerRpc();
         }
     }
